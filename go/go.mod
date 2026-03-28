@@ -1,4 +1,4 @@
-module github.com/supermatt/nibble
+module github.com/SuperMatt/nibble
 
 go 1.21
 
