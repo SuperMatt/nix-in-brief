@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -21,6 +22,19 @@ const (
 	determinateInstall = "https://install.determinate.systems/nix"
 	nixInstallerPath   = "/nix/nix-installer"
 )
+
+// version is set at build time via -ldflags "-X main.version=<tag>".
+// Falls back to module version (remote go install) then "dev".
+var version = "dev"
+
+func init() {
+	if version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok &&
+			info.Main.Version != "" && info.Main.Version != "(devel)" {
+			version = info.Main.Version
+		}
+	}
+}
 
 var (
 	green   = "\033[32m"
@@ -417,6 +431,14 @@ func searchNixpkgs(terms ...string) error {
 var rootCmd = &cobra.Command{
 	Use:   "nib",
 	Short: "nibble (nib) — brew-like wrapper for nix profile",
+}
+
+var versionCmd = &cobra.Command{
+	Use:   "version",
+	Short: "Print the nib version",
+	Run: func(cmd *cobra.Command, args []string) {
+		fmt.Println("nib", version)
+	},
 }
 
 var setupCmd = &cobra.Command{
@@ -836,8 +858,10 @@ func copyFile(src, dst string) error {
 }
 
 func main() {
+	rootCmd.Version = version
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show nix warnings and verbose output")
 	rootCmd.AddCommand(
+		versionCmd,
 		setupCmd,
 		healthCmd,
 		doctorCmd,
