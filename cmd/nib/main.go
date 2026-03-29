@@ -23,14 +23,15 @@ const (
 )
 
 var (
-	green  = "\033[32m"
-	red    = "\033[31m"
-	yellow = "\033[33m"
-	bold   = "\033[1m"
-	reset  = "\033[0m"
-	ok     = green + "✓" + reset
-	fail   = red + "✘" + reset
-	warn   = yellow + "⚠" + reset
+	green   = "\033[32m"
+	red     = "\033[31m"
+	yellow  = "\033[33m"
+	bold    = "\033[1m"
+	reset   = "\033[0m"
+	ok      = green + "✓" + reset
+	fail    = red + "✘" + reset
+	warn    = yellow + "⚠" + reset
+	verbose bool
 )
 
 // ── paths ─────────────────────────────────────────────────────────────────────
@@ -98,10 +99,16 @@ func runCmd(name string, args ...string) error {
 }
 
 // runCmdFiltered streams stdout normally but strips nix warning lines from stderr.
+// When verbose is true, all stderr is passed through unfiltered.
 func runCmdFiltered(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stdin = os.Stdin
+
+	if verbose {
+		cmd.Stderr = os.Stderr
+		return cmd.Run()
+	}
 
 	stderrPipe, err := cmd.StderrPipe()
 	if err != nil {
@@ -360,7 +367,11 @@ type nixPkg struct {
 func searchNixpkgs(terms ...string) error {
 	args := append([]string{"search", "--quiet", "--json", "nixpkgs"}, terms...)
 	cmd := exec.Command("nix", args...)
-	cmd.Stderr = io.Discard
+	if verbose {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return err
@@ -817,6 +828,7 @@ func copyFile(src, dst string) error {
 }
 
 func main() {
+	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "show nix warnings and verbose output")
 	rootCmd.AddCommand(
 		setupCmd,
 		healthCmd,
