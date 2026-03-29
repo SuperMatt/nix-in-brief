@@ -1,4 +1,4 @@
-module github.com/SuperMatt/nibble
+module github.com/SuperMatt/nix-in-brief
 
 go 1.21
 

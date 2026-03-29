@@ -1,10 +1,10 @@
-# nibble
+# nix-in-brief
 
-**nibble** is a brew-like package manager wrapper for [Nix](https://nixos.org/) on standard Linux distros (Fedora, Ubuntu, etc.). The CLI command is `nib` — same relationship as Homebrew / brew.
+**nib** (Nix In Brief) is a brew-like package manager wrapper for [Nix](https://nixos.org/) on standard Linux distros (Fedora, Ubuntu, etc.).
 
-Nix has one of the largest, most up-to-date package repositories available, including packages that aren't available via Homebrew on Linux (such as [ghostty](https://ghostty.org/)). nibble makes it feel familiar.
+Nix has one of the largest, most up-to-date package repositories available, including packages that aren't available via Homebrew on Linux (such as [ghostty](https://ghostty.org/)). nib makes it feel familiar.
 
-## Why nibble?
+## Why nib?
 
 - Single command to install, upgrade, search, and remove packages
 - No `sudo` required for day-to-day operations
@@ -17,8 +17,8 @@ Nix has one of the largest, most up-to-date package repositories available, incl
 ### Quick start (installs Nix too)
 
 ```bash
-git clone https://github.com/SuperMatt/nibble.git
-cd nibble
+git clone https://github.com/SuperMatt/nix-in-brief.git
+cd nix-in-brief
 make install
 nib setup
 ```
@@ -103,7 +103,7 @@ git push --tags
 make install   # nib version → v0.2.0
 ```
 
-For remote installs (`go install github.com/SuperMatt/nibble/cmd/nib@latest`), Go's build info provides the version automatically — no ldflags needed.
+For remote installs (`go install github.com/SuperMatt/nix-in-brief/cmd/nib@latest`), Go's build info provides the version automatically — no ldflags needed.
 
 ## Requirements
 

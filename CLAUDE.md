@@ -2,14 +2,14 @@
 
 ## Project overview
 
-nibble is a brew-like wrapper for `nix profile` on Linux. The CLI command is `nib`. Single Go binary, no runtime dependencies beyond Nix itself.
+nib (Nix In Brief) is a brew-like wrapper for `nix profile` on Linux. The CLI command is `nib`. Single Go binary, no runtime dependencies beyond Nix itself.
 
 ## Structure
 
 ```
-nibble/
+nix-in-brief/
 ├── cmd/nib/main.go   — all source code (single file)
-├── go.mod            — module: github.com/SuperMatt/nibble
+├── go.mod            — module: github.com/SuperMatt/nix-in-brief
 ├── go.sum
 ├── Makefile          — make install → ~/.local/bin/nib
 ├── README.md
@@ -22,7 +22,7 @@ nibble/
 make install   # builds and installs to ~/.local/bin/nib
 ```
 
-Requires Go 1.21+. The module is `github.com/SuperMatt/nibble`. Uses [Cobra](https://github.com/spf13/cobra) for CLI.
+Requires Go 1.21+. The module is `github.com/SuperMatt/nix-in-brief`. Uses [Cobra](https://github.com/spf13/cobra) for CLI.
 
 ## Versioning
 
@@ -53,7 +53,7 @@ nix emits many warnings (`warning:`, `evaluation warning:`, `trace:`) that are n
 
 ## Pinned packages
 
-Stored in `~/.config/nibble/pinned` — one package name per line. `nib upgrade` reads this and skips pinned packages by passing explicit names to `nix profile upgrade` instead of `.*`. Nix has no built-in per-package pin mechanism for imperative profiles, so this is the correct approach.
+Stored in `~/.config/nib/pinned` — one package name per line. `nib upgrade` reads this and skips pinned packages by passing explicit names to `nix profile upgrade` instead of `.*`. Nix has no built-in per-package pin mechanism for imperative profiles, so this is the correct approach.
 
 ## nib outdated
 

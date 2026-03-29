@@ -1,4 +1,4 @@
-// nibble (nib) — brew-like wrapper for nix profile
+// nib (Nix In Brief) — brew-like wrapper for nix profile
 package main
 
 import (
@@ -82,7 +82,7 @@ func fontconfigConf() string {
 
 func pinnedFile() string {
 	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "nibble", "pinned")
+	return filepath.Join(home, ".config", "nib", "pinned")
 }
 
 // ── nix helpers ───────────────────────────────────────────────────────────────
@@ -430,7 +430,7 @@ func searchNixpkgs(terms ...string) error {
 
 var rootCmd = &cobra.Command{
 	Use:   "nib",
-	Short: "nibble (nib) — brew-like wrapper for nix profile",
+	Short: "nib (Nix In Brief) — brew-like wrapper for nix profile",
 }
 
 var versionCmd = &cobra.Command{
@@ -497,7 +497,7 @@ var healthCmd = &cobra.Command{
 	Use:   "health",
 	Short: "Show status of nib prerequisites",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("\n%snibble health%s\n", bold, reset)
+		fmt.Printf("\n%snib health%s\n", bold, reset)
 		fmt.Println(strings.Repeat("─", 50))
 		allOk := true
 		for _, chk := range healthChecks {
@@ -538,7 +538,7 @@ var doctorCmd = &cobra.Command{
 			fmt.Printf("%s Nothing to fix — all checks pass.\n", ok)
 			return nil
 		}
-		fmt.Printf("\n%snibble doctor%s\n", bold, reset)
+		fmt.Printf("\n%snib doctor%s\n", bold, reset)
 		fmt.Println(strings.Repeat("─", 50))
 		reader := bufio.NewReader(os.Stdin)
 		for _, f := range failures {
