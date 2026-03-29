@@ -54,6 +54,8 @@ nib setup                Install Nix and copy nib to ~/.local/bin
 nib uninstall-nix        Fully remove Nix and all packages
 ```
 
+Pass `-v` / `--verbose` to any command to see unfiltered nix output (warnings, traces, evaluation messages are suppressed by default).
+
 ### Examples
 
 ```bash

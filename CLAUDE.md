@@ -33,6 +33,10 @@ Requires Go 1.21+. The module is `github.com/SuperMatt/nibble`. Uses [Cobra](htt
 - ANSI colour constants (`ok`, `fail`, `warn`) are defined at the top — use them consistently
 - Nix binary paths: `nixBinary` and `nixProfileSource` constants cover the standard Determinate Systems install location
 
+## Warning suppression
+
+nix emits many warnings (`warning:`, `evaluation warning:`, `trace:`) that are noise for end users. `runCmdFiltered()` strips these from stderr by default. The global `verbose bool` flag (registered as `-v`/`--verbose` on `rootCmd`) bypasses filtering when true — set `cmd.Stderr = os.Stderr` (or use `runCmdFiltered` which checks `verbose` automatically) rather than `io.Discard` for any new commands that should respect the flag.
+
 ## Pinned packages
 
 Stored in `~/.config/nibble/pinned` — one package name per line. `nib upgrade` reads this and skips pinned packages by passing explicit names to `nix profile upgrade` instead of `.*`. Nix has no built-in per-package pin mechanism for imperative profiles, so this is the correct approach.
