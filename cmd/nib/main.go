@@ -33,6 +33,8 @@ var (
 	warn   = yellow + "⚠" + reset
 )
 
+// ── paths ─────────────────────────────────────────────────────────────────────
+
 func localBin() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "bin")
@@ -43,10 +45,32 @@ func nixFontsDir() string {
 	return filepath.Join(home, ".nix-profile", "share", "fonts")
 }
 
+func nixProfileBin() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".nix-profile", "bin")
+}
+
+func nixProfileShare() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".nix-profile", "share")
+}
+
+func nixProfileMan() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".nix-profile", "share", "man")
+}
+
 func fontconfigConf() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".config", "fontconfig", "conf.d", "10-nix-fonts.conf")
 }
+
+func pinnedFile() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "nibble", "pinned")
+}
+
+// ── nix helpers ───────────────────────────────────────────────────────────────
 
 func nixFound() bool {
 	_, err := exec.LookPath("nix")
@@ -75,6 +99,83 @@ func runCmd(name string, args ...string) error {
 
 func nix(args ...string) error {
 	return runCmd("nix", args...)
+}
+
+// ── pinned packages ───────────────────────────────────────────────────────────
+
+func loadPinned() map[string]bool {
+	pinned := map[string]bool{}
+	data, err := os.ReadFile(pinnedFile())
+	if err != nil {
+		return pinned
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			pinned[line] = true
+		}
+	}
+	return pinned
+}
+
+func savePinned(pinned map[string]bool) error {
+	if err := os.MkdirAll(filepath.Dir(pinnedFile()), 0755); err != nil {
+		return err
+	}
+	var lines []string
+	for pkg := range pinned {
+		lines = append(lines, pkg)
+	}
+	sort.Strings(lines)
+	return os.WriteFile(pinnedFile(), []byte(strings.Join(lines, "\n")+"\n"), 0644)
+}
+
+// ── nix profile list ──────────────────────────────────────────────────────────
+
+type profileElement struct {
+	AttrPath   string   `json:"attrPath"`
+	StorePaths []string `json:"storePaths"`
+}
+
+type profileList struct {
+	Elements map[string]profileElement `json:"elements"`
+}
+
+func getInstalledPackages() (map[string]profileElement, error) {
+	cmd := exec.Command("nix", "profile", "list", "--json")
+	cmd.Stderr = io.Discard
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	var profile profileList
+	if err := json.Unmarshal(out, &profile); err != nil {
+		return nil, err
+	}
+	return profile.Elements, nil
+}
+
+// versionFromStorePath extracts the version from a nix store path.
+// e.g. /nix/store/<hash>-helix-25.0 → "25.0"
+func versionFromStorePath(storePath, pkgName string) string {
+	base := filepath.Base(storePath)
+	// strip the <hash>- prefix
+	if idx := strings.Index(base, "-"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	// strip the package name prefix (handles dots-as-hyphens)
+	normalised := strings.ReplaceAll(pkgName, ".", "-")
+	if after, found := strings.CutPrefix(base, normalised+"-"); found {
+		return after
+	}
+	// fallback: last hyphen-separated segment starting with a digit
+	parts := strings.Split(base, "-")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if len(parts[i]) > 0 && parts[i][0] >= '0' && parts[i][0] <= '9' {
+			return strings.Join(parts[i:], "-")
+		}
+	}
+	return base
 }
 
 // ── health checks ─────────────────────────────────────────────────────────────
@@ -118,12 +219,57 @@ func checkNibOnPath() checkResult {
 	return checkResult{false, "add " + localBin() + " to PATH"}
 }
 
+func checkNixProfileBin() checkResult {
+	bin := nixProfileBin()
+	for _, p := range filepath.SplitList(os.Getenv("PATH")) {
+		if p == bin {
+			return checkResult{true, bin}
+		}
+	}
+	return checkResult{false, bin + " not in PATH — nix-installed binaries won't be found"}
+}
+
+func checkXDGDataDirs() checkResult {
+	share := nixProfileShare()
+	for _, d := range filepath.SplitList(os.Getenv("XDG_DATA_DIRS")) {
+		if d == share {
+			return checkResult{true, share}
+		}
+	}
+	return checkResult{false, share + " not in XDG_DATA_DIRS — desktop files and icons may not work"}
+}
+
+func checkManPath() checkResult {
+	man := nixProfileMan()
+	for _, d := range filepath.SplitList(os.Getenv("MANPATH")) {
+		if d == man {
+			return checkResult{true, man}
+		}
+	}
+	return checkResult{false, man + " not in MANPATH — man pages for nix packages won't be found"}
+}
+
 func checkFontconfig() checkResult {
-	conf := fontconfigConf()
-	if _, err := os.Stat(conf); err == nil {
-		return checkResult{true, conf}
+	if _, err := os.Stat(fontconfigConf()); err == nil {
+		return checkResult{true, fontconfigConf()}
 	}
 	return checkResult{false, nixFontsDir() + " not registered with fontconfig"}
+}
+
+func checkNixGL() checkResult {
+	pkgs, err := getInstalledPackages()
+	if err != nil {
+		return checkResult{true, "skipped (could not read profile)"}
+	}
+	gpuApps := []string{"ghostty"}
+	for _, app := range gpuApps {
+		if _, installed := pkgs[app]; installed {
+			if _, err := exec.LookPath("nixGL"); err != nil {
+				return checkResult{false, app + " is installed but nixGL not found — GPU acceleration may fail (nib install nixgl.nixGLIntel or nixgl.nixGLNvidia)"}
+			}
+		}
+	}
+	return checkResult{true, "ok"}
 }
 
 func fixFontconfig() error {
@@ -145,106 +291,19 @@ func fixFontconfig() error {
 }
 
 var healthChecks = []check{
-	{
-		label: "nix installed",
-		run:   checkNixInstalled,
-	},
-	{
-		label: "nix on PATH",
-		run:   checkNixOnPath,
-	},
-	{
-		label: "nib on PATH",
-		run:   checkNibOnPath,
-	},
+	{label: "nix installed",    run: checkNixInstalled},
+	{label: "nix on PATH",      run: checkNixOnPath},
+	{label: "nib on PATH",      run: checkNibOnPath},
+	{label: "nix profile bin",  run: checkNixProfileBin},
+	{label: "XDG_DATA_DIRS",    run: checkXDGDataDirs},
+	{label: "MANPATH",          run: checkManPath},
 	{
 		label:   "fontconfig",
 		run:     checkFontconfig,
 		fixDesc: "register ~/.nix-profile/share/fonts with fontconfig",
 		fix:     fixFontconfig,
 	},
-}
-
-var healthCmd = &cobra.Command{
-	Use:   "health",
-	Short: "Show status of nib prerequisites",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Printf("\n%snibble health%s\n", bold, reset)
-		fmt.Println(strings.Repeat("─", 50))
-
-		allOk := true
-		for _, chk := range healthChecks {
-			res := chk.run()
-			icon := ok
-			if !res.ok {
-				icon = fail
-				allOk = false
-			}
-			fmt.Printf("  %s  %-20s  %s\n", icon, chk.label, res.detail)
-		}
-		fmt.Println()
-		if allOk {
-			fmt.Printf("%s Everything looks good.\n\n", ok)
-		} else {
-			fmt.Printf("%s Run 'nib doctor' to fix issues.\n\n", warn)
-		}
-		return nil
-	},
-}
-
-var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Diagnose and fix issues interactively",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		type failing struct {
-			chk    check
-			detail string
-		}
-		var failures []failing
-		for _, chk := range healthChecks {
-			res := chk.run()
-			if !res.ok {
-				failures = append(failures, failing{chk, res.detail})
-			}
-		}
-
-		if len(failures) == 0 {
-			fmt.Printf("%s Nothing to fix — all checks pass.\n", ok)
-			return nil
-		}
-
-		fmt.Printf("\n%snibble doctor%s\n", bold, reset)
-		fmt.Println(strings.Repeat("─", 50))
-
-		reader := bufio.NewReader(os.Stdin)
-		for _, f := range failures {
-			fmt.Printf("\n  %s  %s: %s\n", fail, f.chk.label, f.detail)
-			if f.chk.fix == nil {
-				fmt.Println("       (no automatic fix available)")
-				continue
-			}
-			if f.chk.fixDesc != "" {
-				fmt.Printf("       Fix: %s\n", f.chk.fixDesc)
-			}
-			fmt.Print("       Apply fix? [y/N] ")
-			answer, _ := reader.ReadString('\n')
-			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
-				continue
-			}
-			if err := f.chk.fix(); err != nil {
-				fmt.Printf("  %s  %s — error: %v\n", warn, f.chk.label, err)
-				continue
-			}
-			res := f.chk.run()
-			if res.ok {
-				fmt.Printf("  %s  %s — fixed\n", ok, f.chk.label)
-			} else {
-				fmt.Printf("  %s  %s — still failing: %s\n", warn, f.chk.label, res.detail)
-			}
-		}
-		fmt.Println()
-		return nil
-	},
+	{label: "nixGL",            run: checkNixGL},
 }
 
 // ── search ────────────────────────────────────────────────────────────────────
@@ -323,7 +382,6 @@ var setupCmd = &cobra.Command{
 		if err := os.MkdirAll(bin, 0755); err != nil {
 			return err
 		}
-
 		self, err := os.Executable()
 		if err != nil {
 			return err
@@ -332,7 +390,6 @@ var setupCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-
 		dest := filepath.Join(bin, "nib")
 		if self != dest {
 			if err := copyFile(self, dest); err != nil {
@@ -345,14 +402,90 @@ var setupCmd = &cobra.Command{
 		} else {
 			fmt.Printf("nib is already at %s\n", dest)
 		}
-
-		path := os.Getenv("PATH")
-		for _, p := range filepath.SplitList(path) {
+		for _, p := range filepath.SplitList(os.Getenv("PATH")) {
 			if p == bin {
 				return nil
 			}
 		}
 		fmt.Printf("\nAdd %s to your PATH to use 'nib' from anywhere.\n", bin)
+		return nil
+	},
+}
+
+var healthCmd = &cobra.Command{
+	Use:   "health",
+	Short: "Show status of nib prerequisites",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Printf("\n%snibble health%s\n", bold, reset)
+		fmt.Println(strings.Repeat("─", 50))
+		allOk := true
+		for _, chk := range healthChecks {
+			res := chk.run()
+			icon := ok
+			if !res.ok {
+				icon = fail
+				allOk = false
+			}
+			fmt.Printf("  %s  %-20s  %s\n", icon, chk.label, res.detail)
+		}
+		fmt.Println()
+		if allOk {
+			fmt.Printf("%s Everything looks good.\n\n", ok)
+		} else {
+			fmt.Printf("%s Run 'nib doctor' to fix issues.\n\n", warn)
+		}
+		return nil
+	},
+}
+
+var doctorCmd = &cobra.Command{
+	Use:   "doctor",
+	Short: "Diagnose and fix issues interactively",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		type failing struct {
+			chk    check
+			detail string
+		}
+		var failures []failing
+		for _, chk := range healthChecks {
+			res := chk.run()
+			if !res.ok {
+				failures = append(failures, failing{chk, res.detail})
+			}
+		}
+		if len(failures) == 0 {
+			fmt.Printf("%s Nothing to fix — all checks pass.\n", ok)
+			return nil
+		}
+		fmt.Printf("\n%snibble doctor%s\n", bold, reset)
+		fmt.Println(strings.Repeat("─", 50))
+		reader := bufio.NewReader(os.Stdin)
+		for _, f := range failures {
+			fmt.Printf("\n  %s  %s: %s\n", fail, f.chk.label, f.detail)
+			if f.chk.fix == nil {
+				fmt.Println("       (no automatic fix available)")
+				continue
+			}
+			if f.chk.fixDesc != "" {
+				fmt.Printf("       Fix: %s\n", f.chk.fixDesc)
+			}
+			fmt.Print("       Apply fix? [y/N] ")
+			answer, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
+				continue
+			}
+			if err := f.chk.fix(); err != nil {
+				fmt.Printf("  %s  %s — error: %v\n", warn, f.chk.label, err)
+				continue
+			}
+			res := f.chk.run()
+			if res.ok {
+				fmt.Printf("  %s  %s — fixed\n", ok, f.chk.label)
+			} else {
+				fmt.Printf("  %s  %s — still failing: %s\n", warn, f.chk.label, res.detail)
+			}
+		}
+		fmt.Println()
 		return nil
 	},
 }
@@ -385,10 +518,131 @@ var removeCmd = &cobra.Command{
 var upgradeCmd = &cobra.Command{
 	Use:     "upgrade",
 	Aliases: []string{"update"},
-	Short:   "Upgrade all installed packages",
+	Short:   "Upgrade all installed packages (skips pinned)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ensureNix()
-		return nix("profile", "upgrade", ".*")
+		pinned := loadPinned()
+		if len(pinned) == 0 {
+			return nix("profile", "upgrade", ".*")
+		}
+		pkgs, err := getInstalledPackages()
+		if err != nil {
+			return err
+		}
+		var toUpgrade []string
+		for name := range pkgs {
+			if !pinned[name] {
+				toUpgrade = append(toUpgrade, name)
+			}
+		}
+		if len(toUpgrade) == 0 {
+			fmt.Println("All packages are pinned.")
+			return nil
+		}
+		sort.Strings(toUpgrade)
+		fmt.Printf("Upgrading (skipping %d pinned): %s\n", len(pinned), strings.Join(toUpgrade, ", "))
+		return nix(append([]string{"profile", "upgrade"}, toUpgrade...)...)
+	},
+}
+
+var outdatedCmd = &cobra.Command{
+	Use:   "outdated",
+	Short: "Show installed packages with newer versions available",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ensureNix()
+		pkgs, err := getInstalledPackages()
+		if err != nil {
+			return err
+		}
+		if len(pkgs) == 0 {
+			fmt.Println("No packages installed.")
+			return nil
+		}
+
+		type result struct {
+			name       string
+			current    string
+			latest     string
+			outdated   bool
+		}
+
+		fmt.Printf("Checking %d package(s)...\n", len(pkgs))
+		var results []result
+		for name, elem := range pkgs {
+			current := ""
+			if len(elem.StorePaths) > 0 {
+				current = versionFromStorePath(elem.StorePaths[0], name)
+			}
+
+			searchCmd := exec.Command("nix", "search", "--quiet", "--json", "nixpkgs",
+				"^"+strings.ReplaceAll(name, ".", "\\.")+"$")
+			searchCmd.Stderr = io.Discard
+			out, err := searchCmd.Output()
+			latest := current
+			if err == nil {
+				var found map[string]nixPkg
+				if json.Unmarshal(out, &found) == nil {
+					for _, pkg := range found {
+						latest = pkg.Version
+						break
+					}
+				}
+			}
+			results = append(results, result{
+				name:     name,
+				current:  current,
+				latest:   latest,
+				outdated: latest != "" && current != "" && latest != current,
+			})
+		}
+
+		sort.Slice(results, func(i, j int) bool { return results[i].name < results[j].name })
+
+		anyOutdated := false
+		for _, r := range results {
+			if r.outdated {
+				fmt.Printf("  %s  %-30s  %s → %s\n", warn, r.name, r.current, r.latest)
+				anyOutdated = true
+			}
+		}
+		if !anyOutdated {
+			fmt.Printf("%s All packages are up to date.\n", ok)
+		} else {
+			fmt.Printf("\nRun 'nib upgrade' to update.\n")
+		}
+		return nil
+	},
+}
+
+var pinCmd = &cobra.Command{
+	Use:   "pin <pkg>...",
+	Short: "Pin packages so they are skipped during upgrade",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pinned := loadPinned()
+		for _, pkg := range args {
+			pinned[pkg] = true
+			fmt.Printf("  %s  pinned %s\n", ok, pkg)
+		}
+		return savePinned(pinned)
+	},
+}
+
+var unpinCmd = &cobra.Command{
+	Use:   "unpin <pkg>...",
+	Short: "Unpin packages so they are included in upgrades",
+	Args:  cobra.MinimumNArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		pinned := loadPinned()
+		for _, pkg := range args {
+			if pinned[pkg] {
+				delete(pinned, pkg)
+				fmt.Printf("  %s  unpinned %s\n", ok, pkg)
+			} else {
+				fmt.Printf("  %s  %s was not pinned\n", warn, pkg)
+			}
+		}
+		return savePinned(pinned)
 	},
 }
 
@@ -436,14 +690,12 @@ var uninstallNixCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fmt.Println("This will completely remove Nix and all installed packages.")
 		fmt.Print("Are you sure? [y/N] ")
-
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
 		if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 			fmt.Println("Aborted.")
 			return nil
 		}
-
 		installer, err := exec.LookPath("nix-installer")
 		if err != nil {
 			if _, statErr := os.Stat(nixInstallerPath); statErr == nil {
@@ -452,17 +704,14 @@ var uninstallNixCmd = &cobra.Command{
 				return fmt.Errorf("could not find nix-installer. See https://install.determinate.systems/nix")
 			}
 		}
-
 		if err := runCmd(installer, "uninstall", "--no-confirm"); err != nil {
 			return err
 		}
-
 		nibBin := filepath.Join(localBin(), "nib")
 		if _, err := os.Stat(nibBin); err == nil {
 			os.Remove(nibBin)
 			fmt.Printf("Removed %s\n", nibBin)
 		}
-
 		fmt.Println("Nix uninstalled.")
 		return nil
 	},
@@ -474,13 +723,11 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-
 	_, err = io.Copy(out, in)
 	return err
 }
@@ -493,13 +740,15 @@ func main() {
 		installCmd,
 		removeCmd,
 		upgradeCmd,
+		outdatedCmd,
+		pinCmd,
+		unpinCmd,
 		searchCmd,
 		listCmd,
 		infoCmd,
 		rollbackCmd,
 		uninstallNixCmd,
 	)
-
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
