@@ -72,6 +72,17 @@ nib rollback
 
 Nix installs fonts to `~/.nix-profile/share/fonts`. On non-NixOS systems fontconfig doesn't know to look there by default. Run `nib doctor` to register the font path automatically.
 
+### GPU apps (ghostty, etc.)
+
+On non-NixOS Linux, GPU-accelerated apps installed via nix may fail to launch due to OpenGL driver mismatch. nixGL wraps them with the correct drivers. nixGL is **not** in nixpkgs — install it directly:
+
+```bash
+nix profile add github:guibou/nixGL#nixGLIntel    # Intel or AMD
+nix profile add github:guibou/nixGL#nixGLNvidia   # Nvidia
+```
+
+Then launch via `nixGL ghostty`. `nib health` will warn if a GPU app is installed without nixGL present.
+
 ## Building
 
 ```bash

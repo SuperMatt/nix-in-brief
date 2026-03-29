@@ -334,7 +334,7 @@ func checkNixGL() checkResult {
 	for _, app := range gpuApps {
 		if _, installed := pkgs[app]; installed {
 			if _, err := exec.LookPath("nixGL"); err != nil {
-				return checkResult{false, app + " is installed but nixGL not found — GPU acceleration may fail (nib install nixgl.nixGLIntel or nixgl.nixGLNvidia)"}
+				return checkResult{false, app + " is installed but nixGL not found — GPU acceleration may fail\n         nixGL is not in nixpkgs; install via:\n           nix profile add github:guibou/nixGL#nixGLIntel   (Intel/AMD)\n           nix profile add github:guibou/nixGL#nixGLNvidia  (Nvidia)"}
 			}
 		}
 	}
