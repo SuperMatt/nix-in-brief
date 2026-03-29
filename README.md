@@ -74,14 +74,25 @@ Nix installs fonts to `~/.nix-profile/share/fonts`. On non-NixOS systems fontcon
 
 ### GPU apps (ghostty, etc.)
 
-On non-NixOS Linux, GPU-accelerated apps installed via nix may fail to launch due to OpenGL driver mismatch. nixGL wraps them with the correct drivers. nixGL is **not** in nixpkgs — install it directly:
+On non-NixOS Linux, GPU-accelerated apps installed via nix may fail to launch due to OpenGL driver mismatch. None of these are in nixpkgs — install one directly with `nix profile add`.
 
+**Option 1: nixGL** (per-command wrapper)
 ```bash
-nix profile add github:guibou/nixGL#nixGLIntel    # Intel or AMD
-nix profile add github:guibou/nixGL#nixGLNvidia   # Nvidia
+nix profile add github:nix-community/nixGL#nixGLIntel    # Intel or AMD
+nix profile add github:nix-community/nixGL#nixGLNvidia   # Nvidia
 ```
+Then launch via `nixGL ghostty`.
 
-Then launch via `nixGL ghostty`. `nib health` will warn if a GPU app is installed without nixGL present.
+**Option 2: nix-gl-host** (per-command wrapper, auto-detects driver)
+```bash
+nix profile add github:numtide/nix-gl-host
+```
+Then launch via `nix-gl-host ghostty`.
+
+**Option 3: nix-system-graphics** (permanent system-wide fix)
+See https://github.com/soupglasses/nix-system-graphics — no per-command wrapper needed once configured.
+
+`nib health` will warn if a GPU app is installed without nixGL present.
 
 ## Building
 
