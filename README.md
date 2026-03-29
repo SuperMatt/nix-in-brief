@@ -74,25 +74,24 @@ Nix installs fonts to `~/.nix-profile/share/fonts`. On non-NixOS systems fontcon
 
 ### GPU apps (ghostty, etc.)
 
-On non-NixOS Linux, GPU-accelerated apps installed via nix may fail to launch due to OpenGL driver mismatch. None of these are in nixpkgs — install one directly with `nix profile add`.
+On non-NixOS Linux, GPU-accelerated apps installed via nix may fail to launch due to OpenGL driver mismatch. `nib health` will warn if a GPU app is installed without a workaround in place. Run `nib doctor` to install and activate [nix-system-graphics](https://github.com/soupglasses/nix-system-graphics) automatically — a permanent system-wide fix that requires no per-command wrapper.
 
-**Option 1: nixGL** (per-command wrapper)
+Alternatively, install a per-command wrapper manually:
+
+**nixGL**
 ```bash
 nix profile add github:nix-community/nixGL#nixGLIntel    # Intel or AMD
 nix profile add github:nix-community/nixGL#nixGLNvidia   # Nvidia
+nixGL ghostty
 ```
-Then launch via `nixGL ghostty`.
 
-**Option 2: nix-gl-host** (per-command wrapper, auto-detects driver)
+**nix-gl-host** (auto-detects driver)
 ```bash
 nix profile add github:numtide/nix-gl-host
+nix-gl-host ghostty
 ```
-Then launch via `nix-gl-host ghostty`.
 
-**Option 3: nix-system-graphics** (permanent system-wide fix)
-See https://github.com/soupglasses/nix-system-graphics — no per-command wrapper needed once configured.
-
-`nib health` will warn if a GPU app is installed without nixGL present.
+For Nvidia with nix-system-graphics, see the [upstream docs](https://github.com/soupglasses/nix-system-graphics) for the additional driver configuration required.
 
 ## Building
 

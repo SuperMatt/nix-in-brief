@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -73,6 +74,11 @@ func nixProfileShare() string {
 func nixProfileMan() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".nix-profile", "share", "man")
+}
+
+func systemGraphicsFlake() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "nib", "system-graphics", "flake.nix")
 }
 
 func fontconfigConf() string {
@@ -325,7 +331,21 @@ func checkFontconfig() checkResult {
 	return checkResult{false, nixFontsDir() + " not registered with fontconfig"}
 }
 
-func checkNixGL() checkResult {
+func gpuWorkaroundActive() bool {
+	// nix-system-graphics populates /run/opengl-driver
+	if _, err := os.Stat("/run/opengl-driver"); err == nil {
+		return true
+	}
+	// nixGL or nix-gl-host wrapper on PATH
+	for _, bin := range []string{"nixGL", "nix-gl-host"} {
+		if _, err := exec.LookPath(bin); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func checkNixGPU() checkResult {
 	pkgs, err := getInstalledPackages()
 	if err != nil {
 		return checkResult{true, "skipped (could not read profile)"}
@@ -333,12 +353,63 @@ func checkNixGL() checkResult {
 	gpuApps := []string{"ghostty"}
 	for _, app := range gpuApps {
 		if _, installed := pkgs[app]; installed {
-			if _, err := exec.LookPath("nixGL"); err != nil {
-				return checkResult{false, app + " is installed but nixGL not found — GPU acceleration may fail\n         See 'nib health' options: nixGL, nix-gl-host, or nix-system-graphics"}
+			if !gpuWorkaroundActive() {
+				return checkResult{false, app + " is installed but no GPU workaround found — OpenGL may fail"}
 			}
 		}
 	}
 	return checkResult{true, "ok"}
+}
+
+func fixNixSystemGraphics() error {
+	flakePath := systemGraphicsFlake()
+	if err := os.MkdirAll(filepath.Dir(flakePath), 0755); err != nil {
+		return err
+	}
+
+	arch := runtime.GOARCH
+	nixArch := "x86_64-linux"
+	if arch == "arm64" {
+		nixArch = "aarch64-linux"
+	}
+
+	flake := fmt.Sprintf(`{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    system-manager = {
+      url = "github:numtide/system-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-system-graphics = {
+      url = "github:soupglasses/nix-system-graphics";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+
+  outputs = { self, nixpkgs, system-manager, nix-system-graphics, ... }: {
+    systemConfigs.default = system-manager.lib.makeSystemConfig {
+      modules = [
+        nix-system-graphics.systemModules.default
+        {
+          config = {
+            nixpkgs.hostPlatform = "%s";
+            system-manager.allowAnyDistro = true;
+            system-graphics.enable = true;
+          };
+        }
+      ];
+    };
+  };
+}
+`, nixArch)
+
+	if err := os.WriteFile(flakePath, []byte(flake), 0644); err != nil {
+		return err
+	}
+	fmt.Println("  Written", flakePath)
+	fmt.Println("  Running system-manager (this may take a while on first run)...")
+	return runCmd("nix", "run", "github:numtide/system-manager", "--",
+		"switch", "--flake", filepath.Dir(flakePath))
 }
 
 func fixFontconfig() error {
@@ -372,7 +443,12 @@ var healthChecks = []check{
 		fixDesc: "register ~/.nix-profile/share/fonts with fontconfig",
 		fix:     fixFontconfig,
 	},
-	{label: "nixGL",            run: checkNixGL},
+	{
+		label:   "GPU workaround",
+		run:     checkNixGPU,
+		fixDesc: "install nix-system-graphics for system-wide OpenGL support",
+		fix:     fixNixSystemGraphics,
+	},
 }
 
 // ── search ────────────────────────────────────────────────────────────────────
