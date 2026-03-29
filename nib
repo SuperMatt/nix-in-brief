@@ -84,9 +84,31 @@ def cmd_upgrade(args):
     nix("profile", "upgrade", ".*")
 
 
+def _search_nixpkgs(*terms):
+    import json
+    result = subprocess.run(
+        ["nix", "search", "--quiet", "--json", "nixpkgs"] + list(terms),
+        capture_output=True, text=True, check=True,
+    )
+    packages = json.loads(result.stdout)
+    if not packages:
+        print("No packages found.")
+        return
+    for key, pkg in sorted(packages.items()):
+        # key is e.g. "legacyPackages.x86_64-linux.nerd-fonts.monaspace"
+        # strip the first two components to get the install name
+        name = key.split(".", 2)[2] if key.count(".") >= 2 else key
+        version = pkg.get("version", "")
+        description = pkg.get("description", "")
+        print(f"{name} ({version})")
+        if description:
+            print(f"  {description}")
+        print()
+
+
 def cmd_search(args):
     ensure_nix()
-    nix("search", "--quiet", "nixpkgs", *args.terms)
+    _search_nixpkgs(*args.terms)
 
 
 def cmd_list(args):
@@ -96,7 +118,7 @@ def cmd_list(args):
 
 def cmd_info(args):
     ensure_nix()
-    nix("search", "--quiet", "nixpkgs", f"^{args.package}$")
+    _search_nixpkgs(f"^{args.package}$")
 
 
 def cmd_rollback(args):

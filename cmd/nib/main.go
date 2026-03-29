@@ -3,11 +3,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -51,6 +53,52 @@ func runCmd(name string, args ...string) error {
 
 func nix(args ...string) error {
 	return runCmd("nix", args...)
+}
+
+type nixPkg struct {
+	Version     string `json:"version"`
+	Description string `json:"description"`
+}
+
+func searchNixpkgs(terms ...string) error {
+	args := append([]string{"search", "--quiet", "--json", "nixpkgs"}, terms...)
+	cmd := exec.Command("nix", args...)
+	cmd.Stderr = io.Discard
+	out, err := cmd.Output()
+	if err != nil {
+		return err
+	}
+
+	var packages map[string]nixPkg
+	if err := json.Unmarshal(out, &packages); err != nil {
+		return err
+	}
+
+	if len(packages) == 0 {
+		fmt.Println("No packages found.")
+		return nil
+	}
+
+	keys := make([]string, 0, len(packages))
+	for k := range packages {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		pkg := packages[key]
+		// Strip "legacyPackages.<system>." prefix to get the install name
+		name := key
+		if parts := strings.SplitN(key, ".", 3); len(parts) == 3 {
+			name = parts[2]
+		}
+		fmt.Printf("%s (%s)\n", name, pkg.Version)
+		if pkg.Description != "" {
+			fmt.Printf("  %s\n", pkg.Description)
+		}
+		fmt.Println()
+	}
+	return nil
 }
 
 func exitOnErr(err error) {
@@ -169,7 +217,7 @@ var searchCmd = &cobra.Command{
 	Args:  cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ensureNix()
-		return nix(append([]string{"search", "--quiet", "nixpkgs"}, args...)...)
+		return searchNixpkgs(args...)
 	},
 }
 
@@ -188,7 +236,7 @@ var infoCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ensureNix()
-		return nix("search", "--quiet", "nixpkgs", "^"+args[0]+"$")
+		return searchNixpkgs("^" + args[0] + "$")
 	},
 }
 
