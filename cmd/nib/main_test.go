@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+// ── isNixWarning ──────────────────────────────────────────────────────────────
+
+func TestIsNixWarning(t *testing.T) {
+	warnings := []string{
+		"warning: 'vimPlugins.codeium-nvim' was renamed to 'vimPlugins.windsurf-nvim'",
+		"Warning: something deprecated",
+		"evaluation warning: attribute 'foo' is deprecated",
+		"trace: while evaluating the attribute",
+	}
+	for _, line := range warnings {
+		if !isNixWarning(line) {
+			t.Errorf("expected %q to be recognised as a warning", line)
+		}
+	}
+
+	notWarnings := []string{
+		"error: package not found",
+		"building '/nix/store/...'",
+		"copying path '/nix/store/...'",
+		"downloading 'https://cache.nixos.org/...'",
+		"",
+	}
+	for _, line := range notWarnings {
+		if isNixWarning(line) {
+			t.Errorf("expected %q NOT to be recognised as a warning", line)
+		}
+	}
+}
+
 // ── versionFromStorePath ──────────────────────────────────────────────────────
 
 func TestVersionFromStorePath(t *testing.T) {

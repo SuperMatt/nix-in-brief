@@ -97,8 +97,41 @@ func runCmd(name string, args ...string) error {
 	return cmd.Run()
 }
 
+// runCmdFiltered streams stdout normally but strips nix warning lines from stderr.
+func runCmdFiltered(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(stderrPipe)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !isNixWarning(line) {
+			fmt.Fprintln(os.Stderr, line)
+		}
+	}
+
+	return cmd.Wait()
+}
+
+func isNixWarning(line string) bool {
+	lower := strings.ToLower(line)
+	return strings.HasPrefix(lower, "warning:") ||
+		strings.HasPrefix(lower, "evaluation warning:") ||
+		strings.HasPrefix(lower, "trace:")
+}
+
 func nix(args ...string) error {
-	return runCmd("nix", args...)
+	return runCmdFiltered("nix", args...)
 }
 
 // ── pinned packages ───────────────────────────────────────────────────────────
