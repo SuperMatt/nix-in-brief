@@ -1,7 +1,7 @@
-.PHONY: build clean
+.PHONY: install clean
 
 install:
 	GOBIN=$(HOME)/.local/bin go install ./cmd/nib/
 
 clean:
-	rm -f nib-bin
+	go clean -i ./cmd/nib/

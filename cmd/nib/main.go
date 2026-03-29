@@ -17,13 +17,35 @@ import (
 
 const (
 	nixProfileSource   = "/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh"
+	nixBinary          = "/nix/var/nix/profiles/default/bin/nix"
 	determinateInstall = "https://install.determinate.systems/nix"
 	nixInstallerPath   = "/nix/nix-installer"
+)
+
+var (
+	green  = "\033[32m"
+	red    = "\033[31m"
+	yellow = "\033[33m"
+	bold   = "\033[1m"
+	reset  = "\033[0m"
+	ok     = green + "✓" + reset
+	fail   = red + "✘" + reset
+	warn   = yellow + "⚠" + reset
 )
 
 func localBin() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".local", "bin")
+}
+
+func nixFontsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".nix-profile", "share", "fonts")
+}
+
+func fontconfigConf() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".config", "fontconfig", "conf.d", "10-nix-fonts.conf")
 }
 
 func nixFound() bool {
@@ -54,6 +76,200 @@ func runCmd(name string, args ...string) error {
 func nix(args ...string) error {
 	return runCmd("nix", args...)
 }
+
+// ── health checks ─────────────────────────────────────────────────────────────
+
+type checkResult struct {
+	ok     bool
+	detail string
+}
+
+type check struct {
+	label   string
+	run     func() checkResult
+	fixDesc string
+	fix     func() error
+}
+
+func checkNixInstalled() checkResult {
+	if _, err := os.Stat(nixBinary); err == nil {
+		return checkResult{true, nixBinary}
+	}
+	if p, err := exec.LookPath("nix"); err == nil {
+		return checkResult{true, p}
+	}
+	return checkResult{false, "not found — run 'nib setup'"}
+}
+
+func checkNixOnPath() checkResult {
+	if p, err := exec.LookPath("nix"); err == nil {
+		return checkResult{true, p}
+	}
+	if _, err := os.Stat(nixProfileSource); err == nil {
+		return checkResult{false, "source " + nixProfileSource + " or restart your shell"}
+	}
+	return checkResult{false, "nix not installed"}
+}
+
+func checkNibOnPath() checkResult {
+	if p, err := exec.LookPath("nib"); err == nil {
+		return checkResult{true, p}
+	}
+	return checkResult{false, "add " + localBin() + " to PATH"}
+}
+
+func checkFontconfig() checkResult {
+	conf := fontconfigConf()
+	if _, err := os.Stat(conf); err == nil {
+		return checkResult{true, conf}
+	}
+	return checkResult{false, nixFontsDir() + " not registered with fontconfig"}
+}
+
+func checkFcCache() checkResult {
+	out, err := exec.Command("fc-list", "--format=%{file}\n").Output()
+	if err == nil && strings.Contains(string(out), "/nix/") {
+		return checkResult{true, "nix fonts visible to fontconfig"}
+	}
+	if _, err := os.Stat(fontconfigConf()); err != nil {
+		return checkResult{false, "fontconfig not configured (fix fontconfig first)"}
+	}
+	return checkResult{false, "run fc-cache to rebuild font cache"}
+}
+
+func fixFontconfig() error {
+	conf := fontconfigConf()
+	if err := os.MkdirAll(filepath.Dir(conf), 0755); err != nil {
+		return err
+	}
+	content := fmt.Sprintf(`<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>%s</dir>
+</fontconfig>
+`, nixFontsDir())
+	if err := os.WriteFile(conf, []byte(content), 0644); err != nil {
+		return err
+	}
+	fmt.Println("  Written", conf)
+	return nil
+}
+
+func fixFcCache() error {
+	fmt.Println("  Running fc-cache...")
+	return runCmd("fc-cache", "-f", nixFontsDir())
+}
+
+var healthChecks = []check{
+	{
+		label: "nix installed",
+		run:   checkNixInstalled,
+	},
+	{
+		label: "nix on PATH",
+		run:   checkNixOnPath,
+	},
+	{
+		label: "nib on PATH",
+		run:   checkNibOnPath,
+	},
+	{
+		label:   "fontconfig",
+		run:     checkFontconfig,
+		fixDesc: "register ~/.nix-profile/share/fonts with fontconfig",
+		fix:     fixFontconfig,
+	},
+	{
+		label:   "font cache",
+		run:     checkFcCache,
+		fixDesc: "rebuild fc-cache",
+		fix:     fixFcCache,
+	},
+}
+
+var healthCmd = &cobra.Command{
+	Use:   "health",
+	Short: "Show status of nib prerequisites",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Printf("\n%snibble health%s\n", bold, reset)
+		fmt.Println(strings.Repeat("─", 50))
+
+		allOk := true
+		for _, chk := range healthChecks {
+			res := chk.run()
+			icon := ok
+			if !res.ok {
+				icon = fail
+				allOk = false
+			}
+			fmt.Printf("  %s  %-20s  %s\n", icon, chk.label, res.detail)
+		}
+		fmt.Println()
+		if allOk {
+			fmt.Printf("%s Everything looks good.\n\n", ok)
+		} else {
+			fmt.Printf("%s Run 'nib doctor' to fix issues.\n\n", warn)
+		}
+		return nil
+	},
+}
+
+var doctorCmd = &cobra.Command{
+	Use:   "doctor",
+	Short: "Diagnose and fix issues interactively",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		type failing struct {
+			chk    check
+			detail string
+		}
+		var failures []failing
+		for _, chk := range healthChecks {
+			res := chk.run()
+			if !res.ok {
+				failures = append(failures, failing{chk, res.detail})
+			}
+		}
+
+		if len(failures) == 0 {
+			fmt.Printf("%s Nothing to fix — all checks pass.\n", ok)
+			return nil
+		}
+
+		fmt.Printf("\n%snibble doctor%s\n", bold, reset)
+		fmt.Println(strings.Repeat("─", 50))
+
+		reader := bufio.NewReader(os.Stdin)
+		for _, f := range failures {
+			fmt.Printf("\n  %s  %s: %s\n", fail, f.chk.label, f.detail)
+			if f.chk.fix == nil {
+				fmt.Println("       (no automatic fix available)")
+				continue
+			}
+			if f.chk.fixDesc != "" {
+				fmt.Printf("       Fix: %s\n", f.chk.fixDesc)
+			}
+			fmt.Print("       Apply fix? [y/N] ")
+			answer, _ := reader.ReadString('\n')
+			if strings.TrimSpace(strings.ToLower(answer)) != "y" {
+				continue
+			}
+			if err := f.chk.fix(); err != nil {
+				fmt.Printf("  %s  %s — error: %v\n", warn, f.chk.label, err)
+				continue
+			}
+			res := f.chk.run()
+			if res.ok {
+				fmt.Printf("  %s  %s — fixed\n", ok, f.chk.label)
+			} else {
+				fmt.Printf("  %s  %s — still failing: %s\n", warn, f.chk.label, res.detail)
+			}
+		}
+		fmt.Println()
+		return nil
+	},
+}
+
+// ── search ────────────────────────────────────────────────────────────────────
 
 type nixPkg struct {
 	Version     string `json:"version"`
@@ -87,7 +303,6 @@ func searchNixpkgs(terms ...string) error {
 
 	for _, key := range keys {
 		pkg := packages[key]
-		// Strip "legacyPackages.<system>." prefix to get the install name
 		name := key
 		if parts := strings.SplitN(key, ".", 3); len(parts) == 3 {
 			name = parts[2]
@@ -101,15 +316,7 @@ func searchNixpkgs(terms ...string) error {
 	return nil
 }
 
-func exitOnErr(err error) {
-	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			os.Exit(exitErr.ExitCode())
-		}
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
+// ── commands ──────────────────────────────────────────────────────────────────
 
 var rootCmd = &cobra.Command{
 	Use:   "nib",
@@ -162,16 +369,12 @@ var setupCmd = &cobra.Command{
 		}
 
 		path := os.Getenv("PATH")
-		onPath := false
 		for _, p := range filepath.SplitList(path) {
 			if p == bin {
-				onPath = true
-				break
+				return nil
 			}
 		}
-		if !onPath {
-			fmt.Printf("\nAdd %s to your PATH to use 'nib' from anywhere.\n", bin)
-		}
+		fmt.Printf("\nAdd %s to your PATH to use 'nib' from anywhere.\n", bin)
 		return nil
 	},
 }
@@ -258,8 +461,7 @@ var uninstallNixCmd = &cobra.Command{
 
 		reader := bufio.NewReader(os.Stdin)
 		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer != "y" {
+		if strings.TrimSpace(strings.ToLower(answer)) != "y" {
 			fmt.Println("Aborted.")
 			return nil
 		}
@@ -308,6 +510,8 @@ func copyFile(src, dst string) error {
 func main() {
 	rootCmd.AddCommand(
 		setupCmd,
+		healthCmd,
+		doctorCmd,
 		installCmd,
 		removeCmd,
 		upgradeCmd,
