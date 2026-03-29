@@ -183,7 +183,11 @@ type profileList struct {
 
 func getInstalledPackages() (map[string]profileElement, error) {
 	cmd := exec.Command("nix", "profile", "list", "--json")
-	cmd.Stderr = io.Discard
+	if verbose {
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stderr = io.Discard
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -671,7 +675,11 @@ var outdatedCmd = &cobra.Command{
 
 			searchCmd := exec.Command("nix", "search", "--quiet", "--json", "nixpkgs",
 				"^"+strings.ReplaceAll(name, ".", "\\.")+"$")
-			searchCmd.Stderr = io.Discard
+			if verbose {
+				searchCmd.Stderr = os.Stderr
+			} else {
+				searchCmd.Stderr = io.Discard
+			}
 			out, err := searchCmd.Output()
 			latest := current
 			if err == nil {
